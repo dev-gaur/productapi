@@ -1,0 +1,25 @@
+{
+  "name": "productapp",
+  "version": "1.0.0",
+  "description": "a simple restful api for product mgmt",
+  "main": "app.js",
+  "scripts": {
+    "test": "testapp"
+  },
+  "keywords": [
+    "ReST",
+    "MySQL.",
+    "API"
+  ],
+  "author": "Devang Gaur",
+  "license": "ISC",
+  "dependencies": {
+    "jsonwebtoken": "^7.3.0",
+    "mysql": "^2.13.0",
+    "query-string": "^4.3.2"
+  },
+  "devDependencies": {
+    "gulp": "^3.9.1",
+    "gulp-util": "^3.0.8"
+  }
+}
