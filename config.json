@@ -1,6 +1,0 @@
-{
-    "dbhost" : "localhost",
-    "dbuser" : "root",
-    "dbpass" : "password",
-    "dbdatabase" : "productapp"
-}
