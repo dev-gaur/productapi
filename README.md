@@ -1,8 +1,8 @@
-#PRODUCT MGMT API
+# PRODUCT MGMT API
 
 *A RESTful API to manage your product inventory.*
 
-####Stack :
+#### Stack :
 ***NodeJS***,  ***MySQL*** ( No framework involved)
 
 Authentication : **JSON Web Tokens**
@@ -11,7 +11,7 @@ Authentication : **JSON Web Tokens**
 __header args for every request__ :  username, password, token
 
 
-***ACCOUNT REGISTRATION*** 
+***ACCOUNT REGISTRATION***
 
 **Restrictions**
 
@@ -49,7 +49,7 @@ Copy and store your Auth token in your local storage.
 
 <br/>
 
-##Operations
+## Operations
 
 #### ENDPOINT : /api/
 
@@ -64,17 +64,17 @@ Note : ***Every product specific transaction is logged.***
 
 <br/>
 
-* LIST ALL BRANDS 
-	
+* LIST ALL BRANDS
+
 	**GET** /api/brands
 
-	* Query parameters :		
+	* Query parameters :
 		* **startpage**
 		* **pagesize**
 
 <br/>
 
-* LIST ALL PRODUCTS 	
+* LIST ALL PRODUCTS
 
 	**GET** /api/products
 
@@ -84,11 +84,11 @@ Note : ***Every product specific transaction is logged.***
 
 <br/>
 
-* SEARCH PRODUCTS 
-	
+* SEARCH PRODUCTS
+
 	**GET** /api/products/search
-	
-	* Query parameters :		
+
+	* Query parameters :
 		* **q** (search string)
 		* **startpage**
 		* **pagesize**
@@ -108,7 +108,7 @@ _Note_ : **{productcode} must consist 3-7 alphabets followed by 2-4 digits.**
 <br/>
 
 * ADD PRODUCT
-	
+
 	**POST** /api/product/{productcode}
 
 	* Request Body params :
@@ -159,17 +159,17 @@ _Note_ : **{productcode} must consist 3-7 alphabets followed by 2-4 digits.**
 	**DELETE** /api/product/{productcode}
 
 	* Request Body params :
-		
-	 	* stock ( int  how much stock to subtract ) 
 
-	
+	 	* stock ( int  how much stock to subtract )
 
 
-###DATABASE SCHEMA
+
+
+### DATABASE SCHEMA
 
 <br/>
 
-####user
+#### user
 _user entity_
 
 Attribute 	| Description		| Spl
@@ -183,7 +183,7 @@ timcreated	| timestamp for record creation
 
 <br/>
 
-####brand
+#### brand
 _brand entity_
 
 Attribute	| Description		| Spl
@@ -194,7 +194,7 @@ timecreated	| timestamp for record creation
 
 <br/>
 
-####product
+#### product
 _product entity_
 
 Attribute	| Description		| Constraints
@@ -209,8 +209,8 @@ timemodified	| timestamp for latest record edit
 
 <br/>
 
-####operation (READ ONLY)
-_Describes all types of operation API provides_ 
+#### operation (READ ONLY)
+_Describes all types of operation API provides_
 
 id	| name
 ----	| ---------
@@ -227,14 +227,14 @@ id	| name
 
 <br/>
 
-####transaction
-_Logs of all successfull transaction requests_ 
+#### transaction
+_Logs of all successfull transaction requests_
 
 Attribute | Description | Constraints
 ----------- | --------------- | ---------------
 id	|  | Primary Key, auto_inc
 userid	|  | Foreign Key => user(id)
-productcode	|  productcode of the requested product resource 	| 
+productcode	|  productcode of the requested product resource 	|
 operation	|  | Foreign Key => operation(id)
 responsecode	| HTTP Response code
 comments	| remarks
