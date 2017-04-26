@@ -9,7 +9,7 @@ module.exports.logTransaction = function (connection, userid, productcode, opera
 
     if (!productcode) productcode = null;
     if (!comment) comment = null;
-
+    if (!userid) return;
     var sql = "INSERT INTO transaction (userid, productcode, operation, responsecode, comments ) VALUES (?, ?, ?, ?, ?)";
     connection.query({
         sql : sql,
