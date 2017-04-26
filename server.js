@@ -33,17 +33,21 @@ const PRODUCT_URL_REGEX = new RegExp('^/api/product/[A-Za-z]{2,7}[0-9]{2,4}/?$')
 // String in length b/w 4 and 70 are allowed
 const NAME_REGEX = new RegExp('[A-Za-z0-9\s]{4,70}');
 
+const API_REQ_REGEX = new RegExp('^/api/.+');
+const AUTH_REQ_REGEX = new RegExp('^/(register|authtoken)/?$');
 // Adding a function in String prototype to check for AlphaNumeric Values.
 String.prototype.isAlphaNumeric = function() {
   var regExp = /^[A-Za-z0-9]+$/;
   return (this.match(regExp));
 };
 
+var DB = process.env.NODE_ENV == 'test' ? process.env.TESTDBDATABASE : process.env.DBDATABASE;
+
 var connection = mysql.createConnection({
         host     : process.env.DBHOST,
         user     : process.env.DBUSER,
         password : process.env.DBPASS,
-        database : process.env.DBDATABASE
+        database : DB
     });
 
 connection.connect();
@@ -53,6 +57,7 @@ var USER =  {
         userid : null,
         username : null,
         password : null,
+        passwordMD5 : null,
         token : null,
         tokenauthenticated : false,
         accountverified : false
@@ -72,18 +77,35 @@ cleanUp(function (dbconn) {
 
 var server = http.createServer(function(request, response) {
 
+    // USER iS RESET FOR EVERY REQUEST. ReST is STATELESS.
+    USER =  {
+        userid : null,
+        username : null,
+        password : null,
+        passwordMD5 : null,
+        token : null,
+        tokenauthenticated : false,
+        accountverified : false
+    };
+
+    USER.username = request.headers.username || "";
+    USER.password = request.headers.password || "";
+    USER.token = request.headers.authtoken || "";
+
+    USER.passwordMD5 = UTIL.getMD5Hash(USER.password);
+
     // Enabling Cross site request
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
     response.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,contenttype'); // If needed
     response.setHeader('Access-Control-Allow-Credentials', true); // If needed
 
-    var requestbody = '';
+    var reqbody = '';
 
     request.on('data', function (data){
-        requestbody += data;
+        reqbody += data;
 
-        if (requestbody.length > 1e6) {
+        if (reqbody.length > 1e6) {
             HANDLERS.handleError(null, response, "Too much POST data to handle", 403);
             request.connection.destroy();
         }
@@ -96,7 +118,6 @@ var server = http.createServer(function(request, response) {
         var method = request.method;
         var pathstring = parsedurl.pathname;
 
-        console.log(pathstring);
         if (method == 'GET' && pathstring == "/") {
             var fs = require('fs');
             fs.readFile('index.html', function (err, data) {
@@ -122,14 +143,34 @@ var server = http.createServer(function(request, response) {
             return;
         }
 
-        requestbody = qsutil.parse(requestbody);
-        console.log(requestbody);
-        handleRequest (request, response, requestbody);
+        reqbody = qsutil.parse(reqbody);
+
+        if (AUTH_REQ_REGEX.test(pathstring)) {
+            handleAuthRequest (request, response, reqbody);
+            return;
+        }
+
+        if (API_REQ_REGEX.test(pathstring)) {
+            verifyAuthToken(request, response, reqbody);
+            return;
+        }
+
+        var resobj = {
+                message : "Bad Request. No Action available for your request URL",
+                code : 400
+            };
+
+        HANDLERS.handleResponse(response, resobj, 400);
+
     });
 
 });
 
-server.listen(3000);
+var port = process.env.POST || 3000;
+
+server.listen(port, function () {
+    console.log("Server running on port :" + port);
+});
 
 module.exports = server;
 
@@ -141,86 +182,68 @@ var eureka = new events.EventEmitter;
 
 
 // Function to verify user Auth token
-function verifyAuthToken(response, username, password, token, connection) {
+function verifyAuthToken(request, response, reqbody) {
     if (process.env.NODE_ENV == 'test') {
         USER.id = 1;
         USER.accountverified = true;
+        eureka.emit('tommyshoo', request, response, reqbody);
         return true;
     }
 
     try {
-        passwordMD5 = UTIL.getMD5Hash(password);
-        var decoded = jwt.verify(token, passwordMD5);
 
-        if (decoded.user == username){
+        var decoded = jwt.verify(USER.token, USER.passwordMD5);
 
-            USER.username = username;
-            USER.password = password;
-            USER.token = token;
+        if (decoded.user == USER.username){
             USER.tokenauthenticated = true;
-            eureka.emit('tokenok', { 'res' : response, 'pass' : passwordMD5 }); // THIS WILL INVOKE verifyUserAccount for DB records verification.
 
+            verifyUserAccount(request, response, reqbody);
+            return true;
         }
 
         HANDLERS.handleUnauthorisedRequest(response);
         return false;
 
-
     } catch (ex) {
-
         HANDLERS.handleUnauthorisedRequest(response);
         return false;
     }
 }
 
-function verifyUserAccount (obj) {
-    var response = obj['res'];
-    var passwordMD5 = obj['pass'];
+function verifyUserAccount (request, response, reqbody) {
+
     var sql = "SELECT * FROM user WHERE username = ? AND password = ?";
 
     connection.query({
         sql     : sql,
-        values  : [USER.username, passwordMD5]
+        values  : [USER.username, USER.passwordMD5]
     },
     function(error , rows){
 
         if(error) {
-
             HANDLERS.handleError(error, response);
-
         } else if (rows.length == 0) {
-
             HANDLERS.handleUnauthorisedRequest(response);
-
         } else if (rows.length == 1) {
 
-            USER.id = rows[0].id;
             USER.accountverified = true;
+            USER.userid = rows[0].id;
 
-            var resobj = {
-                message : "Account Verified.",
-                credentials : {
-                    user : USER.username,
-                    pass : USER.password,
-                    token : USER.token
-                }
-            };
-
-            HANDLERS.handleResponse(response, resobj, 200);
-
+            eureka.emit('tommyshoo', request, response, reqbody);
         } else {
-
             HANDLERS.handleError(null, response);
-
         }
+
     });
 }
 
 // GAME CHANGER! REFER TO 161
-eureka.on('tokenok', verifyUserAccount);
+eureka.on('tommyshoo', function(request, response, reqbody) {
+    handleProductRequest(request, response, reqbody);
+});
 
 
-/* FUNCTION TO HANDLE ALL THE REQUESTS!
+/* FUNCTION TO HANDLE SIGNUP and AUTH TOKEN REQUESTS!
  *
  *  the return true/false statements are there to help make the code elegant and verbose. Nothing else.
  *
@@ -228,16 +251,12 @@ eureka.on('tokenok', verifyUserAccount);
  *  response : server response object
  *  reqbody : Request body from a POST/PUT request.
  */
-function handleRequest (request, response, reqbody) {
+function handleAuthRequest (request, response, reqbody) {
 
     var parsedurl = url.parse(request.url);
     var method = request.method;
     var querystring = parsedurl.query;
     var pathstring = parsedurl.pathname;
-
-    var username = request.headers.username || "";
-    var password = request.headers.password || "";
-    var token = request.headers.authtoken || "";
 
     /*
      *  REGISTRATION
@@ -251,7 +270,7 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        if (username.length > 16 || username.length < 6 || password.length < 8 || !username.isAlphaNumeric()) {
+        if (USER.username.length > 16 || USER.username.length < 6 || USER.password.length < 8 || !USER.username.isAlphaNumeric()) {
 
             resobj = {  message : "username or password or both too small or large. Username must be alphanumeric in range 6-16 characters. Password must be 8 or more characters.",
                         code : 400
@@ -290,8 +309,8 @@ function handleRequest (request, response, reqbody) {
 
                 resobj= {
                     message : "new user successfully created.",
-                    username : username,
-                    password : password,
+                    username : USER.username,
+                    password : USER.password,
                         code : 200
                 };
 
@@ -316,8 +335,8 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        // Check if User already exists
-        var sql = "SELECT * FROM user WHERE username = '" + username + "' AND password = '" + UTIL.getMD5Hash(password) + "'";
+        // Check if User exists
+        var sql = "SELECT * FROM user WHERE username = '" + USER.username + "' AND password = '" + USER.passwordMD5 + "'";
 
         connection.query(sql, function (error, rows) {
 
@@ -327,10 +346,10 @@ function handleRequest (request, response, reqbody) {
             }
 
             var user = rows[0];
-            var tokendetectedmsg = "No existing token found. Enjoy your first token. :) Copy the token in localstorge. Token valid for 24 hours.";
+            var tokendetectedmsg = "No existing token found. Enjoy your first token. :) Make a note of token somewhere. Token valid for 24 hours.";
 
             if (user.token)
-                tokendetectedmsg = "Existing Token Detected. Deleted the existing token and created fresh token just for you. :) Copy the token in localstorge. Token valid for 24 hours.";
+                tokendetectedmsg = "Existing Token Detected. Deleted the existing token and generating a fresh token just for you. :) Make a note of token somewhere. Token valid for 24 hours.";
 
             // GENERATING AUTHTOKEN
             jwt.sign({ user : user.username },
@@ -346,23 +365,22 @@ function handleRequest (request, response, reqbody) {
                     }
 
                     var tokenexpirytimestamp = Date.now() + TOKEN_DURATION_IN_MILISEC
-                    sql = "UPDATE user SET token = '" + token.toString() + "', tokenexpiry = '" + tokenexpirytimestamp + "' WHERE username = '" + username + "'";
+                    sql = "UPDATE user SET token = '" + token.toString() + "', tokenexpiry = '" + tokenexpirytimestamp + "' WHERE username = '" + user.username + "'";
 
                     connection.query(sql, function (error, result){
 
                         if (error){
-                            console.log("Error occured while Storing token in database...");
                             HANDLERS.handleError(error, response, "Oops! something wrong occured. Try again later.");
                             return false;
                         }
 
                         resobj = {
                                 message : tokendetectedmsg,
-                                user : username,
-                                pass : password,
+                                user : USER.username,
+                                pass : USER.password,
                                 authtoken : token
                             };
-
+                        USER.token = token;
                         HANDLERS.handleResponse(response, resobj, 200);
                         return true;
                     });
@@ -371,6 +389,23 @@ function handleRequest (request, response, reqbody) {
         });
 
     }
+}
+
+
+/* FUNCTION TO HANDLE ALL THE PRODUCT and BRAND RELATED REQUESTS!
+ *
+ *  the return true/false statements are there to help make the code elegant and verbose. Nothing else.
+ *
+ *  request : server request object
+ *  response : server response object
+ *  reqbody : Request body from a POST/PUT request.
+ */
+function handleProductRequest (request, response, reqbody) {
+
+    var parsedurl = url.parse(request.url);
+    var method = request.method;
+    var querystring = parsedurl.query;
+    var pathstring = parsedurl.pathname;
 
     /*
      *  LIST ALL PRODUCTS
@@ -380,14 +415,11 @@ function handleRequest (request, response, reqbody) {
      *      startpage : page to start
      *      pagesize : size of the page
      */
-    else if (method == 'GET' && PRODUCTS_REGEX.test(pathstring))
-
+    if (method == 'GET' && PRODUCTS_REGEX.test(pathstring))
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
             var startpage = qsutil.parse(querystring)['startpage'] || 0;
             var pagesize = qsutil.parse(querystring)['pagesize'] || 10;
             var sql = 'SELECT productcode, product.name, brand.name AS brandname FROM product JOIN brand WHERE product.brand = brand.id';
@@ -416,6 +448,7 @@ function handleRequest (request, response, reqbody) {
 
                     var start = startpage * pagesize;
                     var i = start;
+
                     while (i < (start + pagesize)) {
                         if (rows[i])
                             results.push(rows[i]);
@@ -433,16 +466,13 @@ function handleRequest (request, response, reqbody) {
                     return true;
                 }
 
-                console.log("WRONG QUERY WARNING! Line 389");
                 HANDLERS.handleError(null, response, "Oops! Something went wrong. Try again later.", 501);
                 return false;
 
             });
-        } else {
-
-            handleUnauthorisedRequest(response);
-            return false;
         }
+
+        return;
     }
 
     /*
@@ -457,9 +487,7 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var startpage = qsutil.parse(querystring)['startpage'] || 0;
             var pagesize = qsutil.parse(querystring)['pagesize'] || 10;
@@ -506,14 +534,12 @@ function handleRequest (request, response, reqbody) {
                 }
 
                 handleError(null, response, "Oops! Something bad occured. Try again later.", 501);
-                console.log("Wrong QUERY WARNING!");
+
                 return false;
             });
 
-        } else {
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
+        return;
     }
 
     /*
@@ -529,14 +555,16 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var q = qsutil.parse(querystring)['q'] || "";
+
+            q = q.toLowerCase();
+
             var startpage = qsutil.parse(querystring)['startpage'] || 0;
             var pagesize = qsutil.parse(querystring)['pagesize'] || 10;
-            var sql = "SELECT productcode, product.name, brand.name AS brandname FROM product JOIN brand WHERE product.brand = brand.id AND product.name LIKE 'q%'";
+            var sql = "SELECT productcode, product.name, brand.name AS brandname FROM product JOIN brand WHERE product.brand = brand.id AND lower(product.name) LIKE '" +q + "%'";
+
             var results = [];
 
             if (!q || q.length == 0) {
@@ -549,10 +577,6 @@ function handleRequest (request, response, reqbody) {
 
             connection.query(sql, function (error, rows, fields) {
 
-                if (error) {
-                    HANDLERS.handleError(error, response);
-                    return false;
-                }
 
                 if(rows.length && rows[startpage]) {
 
@@ -576,20 +600,23 @@ function handleRequest (request, response, reqbody) {
                     return true;
                 }
 
-                resobj = { message : "No product matched your search.", code: 404};
-                HANDLERS.handleResponse(response, resobj, 404)
-                // LOG THIS TRANSACTION
-                UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.SEARCHPRODUCT, 404);
+                if (rows.length == 0) {
 
+                    resobj = { message : "No product matched your search.", code: 404};
+                    HANDLERS.handleResponse(response, resobj, 404)
+                    // LOG THIS TRANSACTION
+                    UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.SEARCHPRODUCT, 404);
+
+                    return false;
+                }
+
+                HANDLERS.handleError(error, response);
                 return false;
+
             });
 
-        } else {
-
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
-
+        return;
     }
 
     /*
@@ -600,13 +627,11 @@ function handleRequest (request, response, reqbody) {
      *  query parameters :
      *      code : product code
      */
-    else if (method == 'GET' && PRODUCT_URL_REGEX.test(pathstring) )
+    else if (method == 'GET' && PRODUCT_URL_REGEX.test(pathstring))
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var productcode = PRODUCT_CODE_REGEX.exec(pathstring)[0];
             var sql = "SELECT productcode, product.name, brand.name AS brandname, product.stock FROM product JOIN brand WHERE product.brand = brand.id AND product.productcode = '" + productcode + "'";
@@ -639,12 +664,8 @@ function handleRequest (request, response, reqbody) {
 
             });
 
-        } else {
-
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
-
+        return;
     }
 
     /*
@@ -661,23 +682,17 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
-            console.log(request.headers);
             var productcode = reqbody.code;
             var productname = reqbody.name;
             var productbrand = reqbody.brand;
             var productstock = parseInt(reqbody.stock, 10);
 
-            console.log(productcode, productname, productbrand, productstock);
-            console.log(PRODUCT_CODE_REGEX.test(productcode));
-            console.log(PRODUCT_CODE_REGEX.test(productcode));
-            console.log(NAME_REGEX.test(productname));
-            console.log(NAME_REGEX.test(productbrand));
-            if (!productcode || !PRODUCT_CODE_REGEX.test(productcode) || !productname || !NAME_REGEX.test(productname)
-                || !productbrand || !NAME_REGEX.test(productbrand) || !productstock)
-            {   console.log("gadbad in validation");
+            var isRequestBodyValid = !productcode || !PRODUCT_CODE_REGEX.test(productcode) || !productname || !NAME_REGEX.test(productname)
+                || !productbrand || !NAME_REGEX.test(productbrand) || !productstock;
+
+            if (isRequestBodyValid) {
 
                 resobj = {
                     message : "Bad Request: one or more invalid request header parameter values detected.",
@@ -688,7 +703,7 @@ function handleRequest (request, response, reqbody) {
                 return false;
             }
 
-            var sql = "SELECT * FROM brand WHERE name = '" + productbrand + "'";
+            var sql = "SELECT id FROM brand WHERE name = '" + productbrand + "'";
 
             connection.query(sql, function (error, rows, fields){
                 if (error) {
@@ -698,13 +713,19 @@ function handleRequest (request, response, reqbody) {
 
                 if(rows[0]) {
                     var brandid = rows[0].id;
-                    console.log(brandid);
 
                     sql = "INSERT INTO product (productcode, name, brand, stock) VALUES ( '" + productcode + "', '" + productname + "', '" + brandid + "', " + productstock + ")";
-                    console.log(sql);
+
                     connection.query(sql, function(err, result) {
                         if(err) {
-                            HANDLERS.handleError(error, response);
+                            resobj = {
+                                    message : "Bad Request. A product with this code already exists.",
+                                    code : 400
+                                };
+
+                            HANDLERS.handleResponse(response, resobj, 400)
+                            UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.ADDPRODUCT, 200, "Product code already exists");
+
                             return false;
                         }
 
@@ -724,24 +745,16 @@ function handleRequest (request, response, reqbody) {
                         UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.ADDPRODUCT, 200);
 
                         return true;
-
                     });
 
                     return;
                 }
 
                 HANDLERS.handleError(error, response, "Internal Server Error.", 501);
-                console.log("WRONG QUERY WARNING!! LINE 661");
                 return false;
-
             });
-
-
-        } else {
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
-
+        return;
     }
 
     /*
@@ -752,13 +765,10 @@ function handleRequest (request, response, reqbody) {
      *      stock : product stock (int)
      */
     else if (method == 'POST' && PRODUCT_URL_REGEX.test(pathstring))
-
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var productcode = PRODUCT_CODE_REGEX.exec(pathstring)[0];
             var stock = reqbody.stock;
@@ -810,13 +820,8 @@ function handleRequest (request, response, reqbody) {
                 });
             });
 
-        } else {
-
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
-
         }
-
+        return;
     }
 
     /*
@@ -832,18 +837,14 @@ function handleRequest (request, response, reqbody) {
     {
         var resobj = {};
 
-        var authstatus = verifyAuthToken(response, username, password, token, connection)
-
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var productcode = PRODUCT_CODE_REGEX.exec(pathstring)[0];
 
-            console.log("Productcode : " + productcode);
             var productname = reqbody.name || null;
             var productbrand = reqbody.brand || null ;
             var productstock = reqbody.stock ? parseInt(reqbody.stock, 10) : null;
 
-            console.log(productname, productbrand, productstock);
 
             var params = {};
             if(productname)
@@ -854,9 +855,6 @@ function handleRequest (request, response, reqbody) {
 
             if(productstock)
                 params['stock'] = productstock;
-
-
-            console.log(params);
 
             if (!productcode && !PRODUCT_CODE_REGEX.test(productcode) && !productname && !NAME_REGEX.test(productname)
                 && !productbrand && !NAME_REGEX.test(productbrand) && !productstoack && productstock.length <= 0)
@@ -871,29 +869,26 @@ function handleRequest (request, response, reqbody) {
             }
 
             if(!productbrand){
-                console.log("brand nhi hai");
+
                 editProduct();
+
             } else {
 
                 var sql = "SELECT * FROM brand WHERE lower(name) = '" + productbrand.toLowerCase() + "'";
 
-                console.log("Query : " + sql);
                 connection.query(sql, function (error, rows, fields){
-                    console.log()
+
                     if (error) {
-                        console.log(error);
                         HANDLERS.handleError(error, response, "Bad Request: No such brand exists in the catalog.", 400)
                         return false;
                     }
 
                     if(rows[0]) {
                         var brandid = rows[0].id;
-                        console.log("brand id : " + brandid);
                         editProduct(brandid);
                         return true;
                     }
 
-                    console.log("apan log idhar hia");
                     HANDLERS.handleError(error, response, "Internal Server Error", 501);
                     return false;
                 });
@@ -907,7 +902,6 @@ function handleRequest (request, response, reqbody) {
                     delete params['brand'];
                 }
 
-                console.log(params);
                 var sql = "UPDATE product";
 
                 var flag = 0;
@@ -930,14 +924,12 @@ function handleRequest (request, response, reqbody) {
 
                 sql += " WHERE lower(productcode) = '" + productcode.toLowerCase() + "'";
 
-                console.log(sql);
-
                 connection.query(sql, function(error, result) {
                     if(error) {
                         HANDLERS.handleError(error, response);
                         return false;
                     }
-                    console.log(result);
+
                     resobj = {
                         message : "Product edited successfully.",
                         code : 200,
@@ -957,12 +949,8 @@ function handleRequest (request, response, reqbody) {
                 });
             }
 
-        } else {
-
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
-
+        return;
     }
 
     /*
@@ -983,38 +971,42 @@ function handleRequest (request, response, reqbody) {
         var stock = reqbody.stock || 0;
         stock = parseInt(stock, 10);
 
-        console.log("Andar aya!");
-        var authstatus = verifyAuthToken(response, username, password, token, connection);
 
-        if (authstatus != false && USER.accountverified) {
+        if (USER.accountverified) {
 
             var productcode = PRODUCT_CODE_REGEX.exec(pathstring)[0];
             var sql;
 
             if (!stock) {
                 sql = "DELETE FROM product WHERE lower(productcode) = '" + productcode + "'";
-                connection.query(sql, function(error, rows, fields){
-                    if (error) {
-                        resobj = {
-                            message : "Couldn't DELETE the product stock. There no product in the catalog with the provided productcode.",
-                            code : 404
-                        };
 
-                        HANDLERS.handleResponse(response, resobj, 404);
-                        UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.DELETEPRODUCT, 404);
+                connection.query(sql, function(error, result, fields){
+
+                    if (error) {
+                        HANDLERS.handleError(response);
                         return false;
                     }
 
-                    console.log(rows);
+                    if (result.affectedRows) {
+                        resobj = {
+                                message : "Product deleted successfully.",
+                                code : 200
+                        };
+
+                        HANDLERS.handleResponse(response, resobj, 200);
+                        UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.DELETEPRODUCT, 200);
+                        return true;
+                    }
+
                     resobj = {
-                            message : "Product deleted successfully.",
-                            code : 200
-                    };
+                            message : "No product present with this productcode.",
+                            code : 404
+                        };
 
-                    HANDLERS.handleResponse(response, resobj, 200);
-
+                    HANDLERS.handleResponse(response, resobj, 404);
                     UTIL.logTransaction(connection, USER.id, productcode, operationsEnum.DELETEPRODUCT, 200);
-                    return true;
+
+                    return false;
                 });
 
                 return;
@@ -1040,8 +1032,6 @@ function handleRequest (request, response, reqbody) {
 
                 sql = "UPDATE product SET stock = " + remainstock + " WHERE productcode = '" + productcode + "'";
 
-                console.log(sql);
-
                 connection.query(sql, function(error, rows, fields){
 
                     if (error) {
@@ -1065,23 +1055,18 @@ function handleRequest (request, response, reqbody) {
 
             });
 
-        } else {
-            HANDLERS.handleUnauthorisedRequest(response);
-            return false;
         }
-
+        return;
     }
 
     // Couldn't match any operation to url path.
-    else {
-        console.log("yeh kya tha bc");
-        var resobj = {
-                        message : "Bad Request. No Action available for your request URL",
-                        code : 400
-                    };
 
-        console.log(PRODUCT_URL_REGEX.test(pathstring));
-        HANDLERS.handleResponse(response, resobj, 400);
-        return false;
-    }
+    var resobj = {
+                    message : "Bad Request. No Action available for your request URL",
+                    code : 400
+                };
+
+    HANDLERS.handleResponse(response, resobj, 400);
+
+
 }

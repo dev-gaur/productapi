@@ -25,10 +25,15 @@ module.exports = function(callback, dbconnection) {
     process.exit(2);
   });
 
-  //catch uncaught exceptions, trace, then exit normally
-  process.on('uncaughtException', function(e) {
-    console.log('Uncaught Exception...');
-    console.log(e.stack);
-    process.exit(99);
-  });
+  if(process.env.NODE_ENV != 'test') {
+
+    //catch uncaught exceptions, trace, then exit normally
+    process.on('uncaughtException', function(e) {
+      console.log('Uncaught Exception...');
+      console.log(e.stack);
+      process.exit(99);
+    });
+
+  }
+
 };

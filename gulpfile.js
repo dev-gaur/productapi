@@ -9,7 +9,7 @@ var gulp = require('gulp'),
 gulp.task('server', function() {
   if (node) node.kill()
 
-  node = spawn('node', ['app.js'], {stdio: 'inherit'})
+  node = spawn('node', ['server.js'], {stdio: 'inherit'})
 
   node.on('close', function (code) {
     if (code === 8) {

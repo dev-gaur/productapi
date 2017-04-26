@@ -2,9 +2,9 @@
   "name": "productapp",
   "version": "1.0.0",
   "description": "a simple restful api for product mgmt",
-  "main": "app.js",
+  "main": "server2.js",
   "scripts": {
-    "test": "testapp"
+    "test": "mocha --timeout=10000"
   },
   "keywords": [
     "ReST",
@@ -19,7 +19,10 @@
     "query-string": "^4.3.2"
   },
   "devDependencies": {
+    "chai": "^3.5.0",
+    "chai-http": "^3.0.0",
     "gulp": "^3.9.1",
-    "gulp-util": "^3.0.8"
+    "gulp-util": "^3.0.8",
+    "mocha": "^3.2.0"
   }
 }

@@ -1,3 +1,4 @@
+var crypto = require('crypto');
 var operations = require('./operationsEnum');
 
 module.exports.getMD5Hash = function (str) {
@@ -6,7 +7,6 @@ module.exports.getMD5Hash = function (str) {
 
 module.exports.logTransaction = function (connection, userid, productcode, operationtype, httpcode, comment) {
 
-    console.log("Logging the transaction!!");
     if (!productcode) productcode = null;
     if (!comment) comment = null;
 
@@ -18,7 +18,7 @@ module.exports.logTransaction = function (connection, userid, productcode, opera
     function (error, result) {
         if (error) {
             console.log(error);
-        } else {
+        } else if (process.env.NODE_ENV == 'production') {
            console.log("TRANSACTION : "+ userid + "\t" + productcode + "\t" + operationtype + "\t" + httpcode + "\t" + new Date() + "\t" + comment);
         }
     });

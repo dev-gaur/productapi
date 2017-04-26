@@ -2,6 +2,17 @@
 
 *A RESTful API to manage your product inventory.*
 
+**HEROKU DEMO** : http://afternoon-basin-91812.herokuapp.com/
+
+####Getting Started :
+
+1. FIll in your environment and database variables in .env file.
+
+2. execute "bash setup.sh". Enter the same details as in .env file for prompts.
+	Your app should be running now . If not, Open an issue and let me know.
+
+3. To execute tests, "bash test_this_app.sh" .
+
 #### Stack :
 ***NodeJS***,  ***MySQL*** ( No framework involved)
 
